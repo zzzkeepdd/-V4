@@ -1,0 +1,20 @@
+# V4 策略超市 gitignore
+__pycache__/
+*.pyc
+*.pyo
+data_cache/
+logs/
+config/
+*.csv
+量化平台V3/
+量化平台stream lit/
+.hermes-codex-protocol/
+.hermes/
+check_env.py
+test_*.py
+package-lock.json
+*.exe
+build/
+dist/
+*.spec
+reports/
