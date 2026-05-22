@@ -114,7 +114,7 @@ CROSS_SECTION_SYMBOLS = ("BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/US
 MARKET_STRATEGY_MAP: Dict[str, Dict[str, Any]] = {
     "TRENDING": {
         "trigger": "ADX>25 且价格在EMA50同侧",
-        "strategies": ["趋势回调入场", "BOS移动止损增强版", "SMC_结构转换突破_ETH"],
+        "strategies": ["趋势回调入场", "BOS移动止损增强版"],
     },
     "RANGING": {
         "trigger": "ADX<20 且布林带收窄",
@@ -122,10 +122,10 @@ MARKET_STRATEGY_MAP: Dict[str, Dict[str, Any]] = {
     },
     "HIGH_VOLATILITY": {
         "trigger": "ATR > 20日均ATR × 1.5",
-        "strategies": ["BB挤压突破", "成交量异动"],
+        "strategies": ["BB挤压突破"],
     },
 }
-BASE_STRATEGIES: List[str] = ["资金费率反转"]  # 始终运行，非方向性基座策略
+BASE_STRATEGIES: List[str] = []  # 始终运行，非方向性基座策略（资金费率反转移至backup）
 INDEPENDENT_STRATEGIES: List[str] = ["趋势衰竭反转"]  # 独立信号触发，不绑定市场状态
 WEEKLY_STRATEGIES: List[str] = ["横截面动量选币"]  # 每周自动调仓
 DEFAULT_EXCHANGE_TIMEOUT_MS = 30_000
@@ -147,9 +147,9 @@ API_OBFUSCATION_KEY = "lianghua-platform-v2-local-user"
 EXCHANGE_FALLBACKS = ("gateio", "binance", "okx")
 OKX_BACKUP_HOSTNAMES = ("aws.okx.com", "okx.me")
 OKX_DIRECT_HOSTNAME = "okx.com"
-COMMON_LOCAL_PROXY_PORTS = (7897, 7890, 10809, 10808, 1080, 20171, 2080)
+COMMON_LOCAL_PROXY_PORTS = (0,)  # configure in UI
 EXCHANGE_DIRECT_TIMEOUT_MS = 20_000
-OKX_PRIMARY_PROXY = {"type": "HTTP", "host": "127.0.0.1", "port": "7897", "source": "fixed:7897", "enabled": True}
+OKX_PRIMARY_PROXY = {"type": "HTTP", "host": "127.0.0.1", "port": "0", "source": "user_configured", "enabled": False}
 _LAST_REAL_CLOSE: Dict[str, float] = {}
 _DEFAULT_PRICE_ANCHORS = {
     "BTC": 50_000.0,
@@ -748,7 +748,7 @@ def network_payload_candidates(payload: Dict[str, Any]) -> List[Tuple[str, Dict[
 
     if exchange_id == "okx":
         # 国内网络优先走固定本机代理，再试OKX备用域名，最后直连okx.com。
-        candidates.append(("代理/127.0.0.1:7897", 构建连接尝试配置(with_proxy_config(payload, OKX_PRIMARY_PROXY), use_proxy=True)))
+        candidates.append(("代理/用户配置", 构建连接尝试配置(with_proxy_config(payload, OKX_PRIMARY_PROXY), use_proxy=True)))
         for hostname in OKX_BACKUP_HOSTNAMES:
             candidates.append((f"备用域名/{hostname}", 构建连接尝试配置(payload, use_proxy=False, okx_hostname=hostname)))
         candidates.append(("直连/okx.com", 构建连接尝试配置(payload, use_proxy=False, okx_hostname=OKX_DIRECT_HOSTNAME)))
@@ -813,6 +813,61 @@ def deepseek_model_candidates(model: str) -> List[str]:
         if item and item not in items:
             items.append(item)
     return items or ["deepseek-chat"]
+
+
+def _ai_suggest_params(config: Any, current_params: Dict[str, Any], iteration: int, context: str = "") -> Optional[Dict[str, Any]]:
+    """用DeepSeek reasoner分析当前参数和迭代轮次，给出下一轮候选参数。
+    返回 None 表示AI不可用，调用方降级为本地扰动。
+    """
+    if OpenAI is None:
+        return None
+    try:
+        secure = getattr(config, "load_secure", lambda: {})()
+    except Exception:
+        return None
+    ai = secure.get("deepseek", {}) if isinstance(secure, dict) else {}
+    api_key = ai.get("api_key", "")
+    if not api_key:
+        return None
+    model = ai.get("model", "deepseek-v4-flash")
+    prompt = (
+        f"你是量化策略参数优化师。当前第{iteration}轮优化，{context}。\n"
+        f"当前参数：{safe_json_dumps(current_params, ensure_ascii=False)}\n"
+        f"请分析各参数含义，给出下一轮候选参数（JSON格式，键名必须和当前参数完全一致）。\n"
+        f"规则：\n"
+        f"1. 修改1-3个参数\n"
+        f"2. 每个参数变化幅度≤15%\n"
+        f"3. 整数参数保持整数\n"
+        f"4. 不要修改 initial_capital 和 leverage\n"
+        f"5. 只返回JSON，不要解释"
+    )
+    try:
+        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com", timeout=90.0, max_retries=0,
+                        http_client=deepseek_http_client_with_proxy())
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": "你是量化参数优化师，只输出JSON，不要任何解释。"},
+                      {"role": "user", "content": prompt}],
+            max_tokens=600,
+        )
+        text = extract_deepseek_message_text(response)
+        # 提取JSON块
+        json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+        if json_match:
+            suggested = json.loads(json_match.group(0))
+            result = dict(current_params)
+            for key, value in suggested.items():
+                if key in current_params and key not in ("initial_capital", "leverage"):
+                    orig = current_params[key]
+                    if isinstance(orig, int) and not isinstance(orig, bool):
+                        result[key] = max(1, int(round(float(value))))
+                    elif isinstance(orig, float):
+                        result[key] = float(value)
+            return result
+    except Exception:
+        pass
+    return None
+
 
 def deepseek_chat_text(api_key: str, model: str, messages: List[Dict[str, str]], max_tokens: int = 360) -> Tuple[str, str]:
     """调用DeepSeek并在空返回时自动换用deepseek-chat重试。"""
@@ -987,7 +1042,7 @@ def 提取交易所调试信息(exc: Exception, exchange: Any = None, payload: O
     if args_text and args_text != str(exc):
         lines.append(f"- 异常参数：{args_text}")
     lines.append("")
-    lines.append("说明：OKX会先尝试127.0.0.1:7897代理，再尝试备用域名，最后才直连okx.com。")
+    lines.append("说明：OKX会先尝试用户配置的代理，再尝试备用域名，最后才直连。")
     return "\n".join(lines)
 
 
@@ -1240,11 +1295,15 @@ class StrategyManager:
         self.strategy_dir = strategy_dir
         self.strategies: List[StrategyInfo] = []
 
+    _EXCLUDED_STRATEGIES = {"SMC_结构转换突破_ETH", "成交量异动"}
+
     def scan(self) -> List[StrategyInfo]:
         self.strategies = []
         if not self.strategy_dir.exists():
             return self.strategies
         for path in sorted(self.strategy_dir.glob("*.py")):
+            if path.stem in self._EXCLUDED_STRATEGIES:
+                continue
             source = 读取文本(path)
             labels = self._parse_labels(source)
             params = self._calibrate_default_params(path.stem, self._parse_params(source))
@@ -1328,7 +1387,7 @@ class StrategyManager:
 
     def _calibrate_default_params(self, strategy_name: str, params: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         calibrated = {key: dict(value) for key, value in (params or {}).items() if isinstance(value, dict)} or {"PARAMS_DEFAULT": {}}
-        if strategy_name == "SMC_??????_ETH":
+        if strategy_name == "SMC_结构转换突破_ETH":
             for values in calibrated.values():
                 risk_value = values.get("risk_percent")
                 if isinstance(risk_value, (int, float)) and risk_value > 0.2:
@@ -2793,17 +2852,26 @@ class StrategyBacktestPage(QWidget):
             QMessageBox.critical(self, "AI自动优化失败", traceback.format_exc()[-3000:])
 
     def _next_backtest_params(self, params: Dict[str, Any], iteration: int) -> Dict[str, Any]:
-        """生成下一轮参数候选；AI不可用时仍可本地迭代。"""
+        """用DeepSeek reasoner分析当前参数和回测结果，给出下一轮候选参数。"""
+        result = _ai_suggest_params(self.config, params, iteration, context="回测页参数优化")
+        return result if result else self._local_param_perturb(params, iteration)
+
+    @staticmethod
+    def _local_param_perturb(params: Dict[str, Any], iteration: int) -> Dict[str, Any]:
+        """DeepSeek不可用时，本地小幅扰动参数（幅度随轮次递减）。"""
         candidate = dict(params)
-        factor = 1.0 + (0.08 if iteration % 2 else -0.06)
-        for key, value in candidate.items():
-            if isinstance(value, (int, float)) and key not in ("initial_capital", "leverage"):
-                if isinstance(value, bool):
-                    continue
-                if isinstance(value, int) and not isinstance(value, bool):
-                    candidate[key] = max(1, int(round(float(value) * factor)))
-                else:
-                    candidate[key] = round(float(value) * factor, 6)
+        magnitude = max(0.02, 0.10 / (1 + iteration * 0.3))
+        direction = 1.0 if iteration % 3 == 0 else (-1.0 if iteration % 3 == 1 else (1.0 if hash(str(iteration)) % 2 else -1.0))
+        factor = 1.0 + direction * magnitude
+        for key in sorted(candidate.keys()):
+            value = candidate[key]
+            if isinstance(value, bool) or key in ("initial_capital", "leverage"):
+                continue
+            if isinstance(value, int):
+                candidate[key] = max(1, int(round(float(value) * factor)))
+                break
+            elif isinstance(value, float):
+                candidate[key] = round(float(value) * factor, 6)
                 break
         return candidate
 
@@ -4412,7 +4480,11 @@ class AIAssistantPage(QWidget):
             QMessageBox.critical(self, "参数优化失败", str(exc))
 
     def _next_params(self, params: Dict[str, Any], iteration: int) -> Dict[str, Any]:
-        """本地生成下一轮参数建议，DeepSeek不可用时也能推进优化。"""
+        """用DeepSeek reasoner分析当前参数和回测结果，给出下一轮候选参数。"""
+        result = _ai_suggest_params(self.config, params, iteration, context="AI助手参数优化")
+        if result:
+            return result
+        # 降级：本地小幅扰动
         new_params = dict(params)
         factor = 1.0 + (0.03 if iteration % 2 else -0.02)
         for key, value in list(new_params.items()):
@@ -4999,6 +5071,7 @@ class RiskPage(QWidget):
 
     def _build_ui(self) -> None:
         """构建风控页面。"""
+        self.setMinimumHeight(400)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 12)
         title_row = QHBoxLayout()
@@ -5022,6 +5095,11 @@ class RiskPage(QWidget):
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["规则", "状态", "阈值", "当前值", "说明"])
         设置表格样式(self.table)
+        self.table.setColumnWidth(0, 180)
+        self.table.setColumnWidth(1, 80)
+        self.table.setColumnWidth(2, 140)
+        self.table.setColumnWidth(3, 140)
+        self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table, 1)
         self.refresh_button.clicked.connect(self.refresh)
 
@@ -5031,7 +5109,7 @@ class RiskPage(QWidget):
             ("单笔风险", "正常", "≤ 1.00%", "0.00%", "按止损距离限制单笔潜在亏损"),
             ("日内最大亏损", "正常", "≤ 3.00%", "0.00%", "触发后停止新开仓"),
             ("最大杠杆", "正常", "≤ 20x", "1x", "避免过度放大波动"),
-            ("自动交易仓位分配", "正常", "总杠杆 ≤ 3x", "硬编码启用", "资金费率反转 → 独立 1.0% | 双策略共振 → 各 0.5% | 趋势衰竭反转 → 1.5% | BB挤压突破 → 1.0%"),
+            ("自动交易仓位分配", "正常", "总杠杆 ≤ 3x", "硬编码启用", "横截面动量选币 → 权重门控 | 趋势回调入场 → 1.5% | BB挤压突破 → 1.0% | 摆动点区间反转 → 1.0%"),
             ("横截面动量选币", "正常", "不占风险预算", "权重门控", "输出多币种权重；全现金时平掉方向性仓位并暂停方向性开仓"),
             ("最大持仓数", "正常", "≤ 3", "0", "控制相关性和保证金占用"),
             ("API状态", "待验证" if not self.config.load_secure().get("exchange", {}).get("api_key") else "正常", "已配置", "已配置" if self.config.load_secure().get("exchange", {}).get("api_key") else "未配置", "交易前必须通过私有接口验证"),
@@ -5268,6 +5346,8 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("metricCard")
         card.setCursor(Qt.CursorShape.PointingHandCursor)
+        card.setMinimumHeight(140)
+        card.setMinimumWidth(280)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(6)
@@ -5313,7 +5393,7 @@ class MainWindow(QMainWindow):
             self.market_strategy_table.setItem(row, 2, QTableWidgetItem(", ".join(info.get("strategies", []))))
 
     def _build_system_settings_page(self) -> QWidget:
-        """构建系统设置页：交易所连接 + 风控视图 + 日志管理。"""
+        """构建系统设置页：交易所连接 + 风控视图 + 日志管理（平坦布局，不起用ScrollArea避免压缩子组件）。"""
         page = QWidget()
         layout_main = QVBoxLayout(page)
         layout_main.setContentsMargins(14, 14, 14, 14)
@@ -5322,22 +5402,15 @@ class MainWindow(QMainWindow):
         title.setObjectName("pageTitle")
         layout_main.addWidget(title)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        inner = QWidget()
-        layout = QVBoxLayout(inner)
-        layout.setSpacing(12)
-
         self.exchange_settings = SettingsPage(self.config)
         self.exchange_settings.status_changed.connect(self.statusBar().showMessage)
         if hasattr(self.exchange_settings, "connection_status_changed"):
             self.exchange_settings.connection_status_changed.connect(self._update_connection_status)
-        layout.addWidget(self.exchange_settings)
+        layout_main.addWidget(self.exchange_settings, 2)
 
         self.risk_page = RiskPage(self.config)
         self.risk_page.status_changed.connect(self.statusBar().showMessage)
-        layout.addWidget(self.risk_page)
+        layout_main.addWidget(self.risk_page, 1)
 
         log_section = QGroupBox("日志管理")
         log_row = QHBoxLayout()
@@ -5371,10 +5444,7 @@ class MainWindow(QMainWindow):
 
         export_btn.clicked.connect(_export_logs)
         clear_btn.clicked.connect(_clear_logs)
-        layout.addWidget(log_section)
-        layout.addStretch()
-        scroll.setWidget(inner)
-        layout_main.addWidget(scroll, 1)
+        layout_main.addWidget(log_section)
         return page
 
     def _build_status_bar(self) -> None:

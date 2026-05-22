@@ -59,7 +59,7 @@ echo 状态页: http://localhost:8099
 echo 日志目录: logs/
 echo.
 echo 注意事项：
-echo   - OKX 模拟盘需要代理 127.0.0.1:7897 运行中
+echo   - OKX 模拟盘需要代理运行中
 echo   - 首次运行请在设置页填写 API 凭证
 echo   - 风控规则硬编码，AI 不可修改
 echo   - 代码含中文注释，推荐 VS Code 编辑

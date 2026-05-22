@@ -508,7 +508,7 @@ class SettingsPage(QFrame):
             f"交易所模式变更后需要重启应用才能生效。\n\n"
             f"切换到实盘前请确保：\n"
             f"  • API 凭证已正确配置（config/api_config.json）\n"
-            f"  • 网络代理已启动（推荐 127.0.0.1:7897）\n"
+            f"  • 网络代理（如有需自行配置）\n"
             f"  • 已充分了解实盘风险\n\n"
             f"当前模式仍为「{self._previous_mode}」，重启后切换为「{new_mode}」。"
         )

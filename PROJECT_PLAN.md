@@ -8,19 +8,19 @@
 
 ### DeepSeek AI
 - base_url: https://api.deepseek.com
-- api_key: sk-b1fdc824fca54a24a8fc5801856ebb4f
+- api_key: YOUR_DEEPSEEK_API_KEY
 - 市场分类/快速分析用 deepseek-chat（非推理模型）
 - 深度分析（复盘/参数优化）用 deepseek-reasoner
 
 ### OKX 模拟盘
-- apiKey: cec3ebc2-f260-47b8-9821-885a6e2ad393
-- secretKey: 6CADE7B77AEA6D875960FCA97DA3D7A2
-- password: Zz871160891-
+- apiKey: YOUR_OKX_API_KEY
+- secretKey: YOUR_OKX_SECRET
+- password: YOUR_OKX_PASSPHRASE
 - 权限: read,trade
 - 模拟盘标记: apiName="模拟"
 
 ### 网络代理
-- 地址: 127.0.0.1:7897
+- 地址: 127.0.0.1:用户自配
 - OKX 必须走代理优先（踩坑经验），不直连
 
 ## 三、技术栈
@@ -163,7 +163,7 @@ def strategy_logic(ohlc_df, factor_df, params):
 ## 十一、交易所连接
 
 三级降级（代理优先）：
-1. 代理连接（127.0.0.1:7897）— 优先
+1. 代理连接（用户自配）— 优先
 2. 备用域名（aws.okx.com, okx.me）
 3. 直连（okx.com）— 最后尝试
 

@@ -117,7 +117,7 @@ USER_CONFIG_FILE = CONFIG_DIR / "user_config.json"
 
 # ===== 代理与连接常量 =====
 
-DEFAULT_PROXY = {"type": "HTTP", "host": "127.0.0.1", "port": "7897"}
+DEFAULT_PROXY = {"type": "HTTP", "host": "127.0.0.1", "port": "0" # disabled, configure in UI}
 DEFAULT_EXCHANGE_TIMEOUT_MS = 30_000
 BACKUP_HOSTNAMES = ("aws.okx.com", "okx.me")
 DIRECT_HOSTNAME = "okx.com"
@@ -369,7 +369,7 @@ class SimExchange(ExchangeInterface):
         return load_config(USER_CONFIG_FILE)
 
     def _build_exchange_with_proxy(self) -> ccxt.Exchange:
-        """用固定代理（127.0.0.1:7897）创建 OKX 实例。"""
+        """用固定代理（127.0.0.1:PORT）创建 OKX 实例。"""
         api_config = self._api_config
         return ccxt.okx({
             "apiKey": api_config.get("apiKey", ""),
@@ -438,7 +438,7 @@ class SimExchange(ExchangeInterface):
         """建立 OKX 模拟盘连接，三级降级策略。
 
         降级顺序：
-        1. 代理连接（127.0.0.1:7897）— 优先
+        1. 代理连接（127.0.0.1:PORT）— 优先
         2. 备用域名（aws.okx.com → okx.me）
         3. 直连（okx.com）— 最后尝试
 

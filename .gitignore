@@ -1,20 +1,47 @@
-# V4 策略超市 gitignore
+# 敏感凭证
+config/api.json
+config/secure_config.bin
+config/api_config.json
+config/session_state.json
+
+# 日志和运行时数据
+config/ai_decision_logs.csv
+config/trade_logs.csv
+config/sim_orders.csv
+
+# 缓存数据
+data_cache/
 __pycache__/
 *.pyc
 *.pyo
-data_cache/
-logs/
-config/
-*.csv
+
+# 日志
+*.log
+
+# 环境
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# MongoDB
+MongoDB/
+
+# 子项目（不参与发布）
 量化平台V3/
 量化平台stream lit/
-.hermes-codex-protocol/
-.hermes/
-check_env.py
-test_*.py
-package-lock.json
-*.exe
-build/
-dist/
-*.spec
-reports/
+
+# 旧git备份
+.git_bak/
+
+# 其他V4子目录
+data_cache/
+config/

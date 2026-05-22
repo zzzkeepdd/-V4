@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 _COINS = ("BTC", "ETH", "SOL")
-_EXCLUDED_FILENAMES = {"成交量异动.py", "资金费率反转.py"}
+_EXCLUDED_FILENAMES = {"成交量异动.py", "SMC_结构转换突破_ETH.py"}
 _GENERIC_PACK_KEYWORDS = (
     ("DEFAULT", 70),
     ("RECOMMENDED", 65),
@@ -54,8 +54,6 @@ def _parse_quality_score(source: str, filename: str) -> float:
     scores = [float(match.group(1)) for match in re.finditer(r"(?<!\d)(\d+(?:\.\d+)?)/5", source)]
     if scores:
         return max(scores)
-    if filename == "资金费率反转.py":
-        return 2.0
     return 5.0
 
 
@@ -139,6 +137,19 @@ def _parse_param_assignments(source: str) -> dict:
         return parsed
 
     for node in module.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            if node.targets[0].id == "SYMBOL_PARAMS":
+                try:
+                    value = _literal_eval_node(node.value, env)
+                    if isinstance(value, dict):
+                        for asset, asset_params in value.items():
+                            if isinstance(asset_params, dict):
+                                key = f"PARAMS_{str(asset).upper()}"
+                                env[key] = dict(asset_params)
+                                parsed[key] = dict(asset_params)
+                except Exception:
+                    pass
+                continue
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
