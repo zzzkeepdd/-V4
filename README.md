@@ -1,15 +1,73 @@
-# 量化交易平台 V4 (Quantitative Trading Platform V4)
+# 量化交易平台 V4 — 策略超市 (Strategy Supermarket)
 
-PyQt6 desktop application for cryptocurrency quantitative trading — strategy backtesting, live monitoring, AI-assisted market analysis, and risk management. Built from V3 refactoring with enhanced multi-strategy coordination and MUJI minimalist design.
+加密货币量化交易桌面程序。核心理念：AI 根据实时行情和币种特征，自动选择策略 + 选择参数 + 持续调参，人只需要看一眼最终结果。
+
+Cryptocurrency quantitative trading desktop app. Core philosophy: AI selects the right strategy + right parameters for current market conditions, and continuously auto-tunes them. Human only needs to glance at the final result.
+
+## AI 决策流水线 (AI Decision Pipeline)
+
+V4 的核心不是"回测平台"，而是"AI 交易员"。每一轮分析走三层流水线：
+
+```
+行情数据(OHLCV) → 技术特征提取 → AI判断行情状态 → AI匹配策略+参数包 → 生成交易信号
+```
+
+### 1. AI 选策略 — 行情状态 × 币种适配 (AI Strategy Selection)
+
+AI 读取 26 维技术特征（ADX/ATR/BB/RSI/EMA/成交量/摆动点），先判断当前行情属于六种状态之一，再根据状态自动匹配策略：
+
+| 行情状态 | AI 判断条件 | 自动激活策略 |
+|---------|------------|------------|
+| TRENDING_UP | ADX>25, 价格>EMA20, EMA多头排列 | 趋势回调入场（趋势追随） |
+| TRENDING_DOWN | ADX>25, 价格<EMA20, EMA空头排列 | 趋势回调入场（趋势追随） |
+| RANGING | ADX<20, 价格区间震荡 | 摆动点区间反转（均值回归） |
+| HIGH_VOLATILITY | ATR/ATR_MA>1.5, BB带宽扩张 | 暂停交易 / 降级到保守参数 |
+| TREND_EXHAUSTION | 连续20+根同向K线, RSI背离 | 趋势衰竭反转（逆势捕捉） |
+| CHAOTIC | 信号冲突, 无法判断 | 不交易，等待明确信号 |
+
+同时按币种过滤：BTC/ETH 优先，SOL 仅在特定策略下可用（趋势回调入场 SOL 胜率仅 26.7%，自动排除）。
+
+降级链：DeepSeek Reasoner → DeepSeek Chat → 本地规则引擎。任一层失败自动降级，不中断交易。
+
+### 2. AI 选参数 — 行情自适应 (AI Parameter Selection)
+
+同一个策略在不同行情下用不同参数包。AI 根据 market_state × coin 返回最优参数组合：
+
+- RANGING + BTC：摆动点区间反转，adx_threshold=20（更敏感），rr_ratio=2.0
+- RANGING + ETH：同一策略，adx_threshold=25（更保守），rr_ratio=2.0
+- TRENDING + BTC：趋势回调入场，fib=[0.5,0.618]，volume=ON
+- TRENDING + ETH：同一策略，fib=[0.382,0.618]，volume=ON
+
+参数包在策略文件中预定义为 PARAMS_BTC / PARAMS_ETH / PARAMS_SOL。AI 选择哪个参数包，而不是重新发明参数——保证可解释性。
+
+### 3. AI 自动调参 — DeepSeek 智能优化 (AI Auto-Tuning)
+
+不是网格搜索，不是 ±8% 盲调。每次回测后，AI 读取当前参数和回测结果，分析策略含义，选择 1-3 个参数在 ±15% 范围内智能调整：
+
+```
+输入: 策略代码(摆动点区间反转) + 当前参数(pivot_lb=4, adx_threshold=20) + 回测结果(WR 42%, Sharpe 0.8)
+AI 分析: "WR 偏低，pivot_lb 也许需要更短的窗口来捕捉更细的摆动结构。ADX 阈值偏高可能过滤了太多震荡机会。"
+AI 输出: pivot_lb→3, adx_threshold→18
+```
+
+LLM 不可用时降级为递减幅度的小扰动（0.10→0.02），避免大盲跳破坏收敛。
 
 ## Key Features
 
-- Strategy backtesting with interactive parameter optimization (AI-powered via DeepSeek)
-- Live trading monitor with OKX simulated trading (demo endpoint)
-- AI market state analysis & strategy matching (DeepSeek chat/reasoner)
-- Risk control panel with configurable leverage, daily loss limits, ATR circuit breakers
+- AI 决策流水线：行情判断 → 策略匹配 → 参数选择 → 自动调参，四步全自动
+- AI Decision Pipeline: market state analysis → strategy matching → parameter selection → auto-tuning, fully automated
+- 策略回测 + AI 智能参数优化（DeepSeek，非网格搜索）
+- Strategy backtesting with AI-powered parameter optimization (DeepSeek, not grid search)
+- OKX 模拟盘实盘监控（demo endpoint）
+- Live trading monitor with OKX simulated trading
+- 三层 AI 降级链：Reasoner → Chat → 本地规则，永不中断
+- Three-tier AI degradation: Reasoner → Chat → Local rules, never halts
+- 风控面板：杠杆/日亏损上限/ATR熔断/复利回撤锁仓
+- Risk control: leverage cap, daily loss circuit breaker, ATR fuse, compound drawdown lock
+- 历史重放：用历史数据验证策略表现
 - Historical replay for strategy validation
-- Strategy coordination panel for multi-strategy conflict resolution
+- 策略协同面板：多策略冲突裁决
+- Strategy coordination panel: multi-strategy conflict resolution
 
 ## Included Strategies
 
